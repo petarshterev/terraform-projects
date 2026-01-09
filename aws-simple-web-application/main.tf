@@ -5,6 +5,14 @@ terraform {
       version = "~> 6.0"
     }
   }
+  backend "s3" {
+    bucket = var.aws_state_bucket_name
+    key    = "workspace/terraform.tfstate"
+    region = var.region
+
+    dynamodb_table = "terraform_locks"
+    encrypt        = true
+  }
 }
 
 provider "aws" {
@@ -47,18 +55,6 @@ resource "aws_dynamodb_table" "terraform_locks" {
     name = "LockID"
     type = "S"
   }
-}
-
-terraform {
-  backend "s3" {
-    bucket = var.aws_state_bucket_name
-    key    = "workspace/terraform.tfstate"
-    region = var.region
-
-    dynamodb_table = "terraform_locks"
-    encrypt        = true
-  }
-
 }
 
 data "aws_ami" "amazon_linux" {
