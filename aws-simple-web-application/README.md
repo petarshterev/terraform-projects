@@ -39,7 +39,11 @@ Route53 (DNS)
 aws-simple-web-application/
 ├── main.tf          # Main Terraform configuration
 └── variables.tf     # Variable definitions
+└── output.tf        # Terraform outputs
 README.md            # This file
+
+modules/aws_instance # Module for EC2 instance
+
 ```
 
 ## Setup Instructions
