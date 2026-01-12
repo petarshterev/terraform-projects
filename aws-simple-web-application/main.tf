@@ -5,18 +5,43 @@ terraform {
       version = "~> 6.0"
     }
   }
-  backend "s3" {
+/*  backend "s3" {
     bucket = var.aws_state_bucket_name
     key    = "workspace/terraform.tfstate"
     region = var.region
 
     dynamodb_table = "terraform_locks"
     encrypt        = true
-  }
+  }*/
 }
 
 provider "aws" {
   region = var.region
+}
+
+### Retrieving some modules
+## AWS EC2 instance module
+
+module "aws_instance" {
+  source = "../modules/aws_instance"
+
+  ami               = data.aws_ami.amazon_linux.id
+  instance_type     = var.instance_type
+  instance_count    = var.aws_instances_number
+  security_groups   = [aws_security_group.ec2.id]
+  subnet_ids        = aws_subnet.private_ec2[*].id
+  user_data         = <<-EOF
+#!/bin/bash
+yum update -y
+yum install -y httpd
+systemctl start httpd
+systemctl enable httpd
+echo "<h1>Hello from Instance \${count.index + 1}</h1>" > /var/www/html/index.html
+EOF
+  tags = {
+    Project = "SimpleWebApplication"
+    Name    = "app-instance"
+  }
 }
 
 ### Create private encrypted S3 bucket with enabled versioning and DynamoDB table for the terraform state files.
@@ -326,30 +351,10 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-resource "aws_instance" "app" {
-  count         = var.aws_instances_number
-  ami           = data.aws_ami.amazon_linux.id
-  instance_type = var.instance_type
-  subnet_id     = aws_subnet.private_ec2[count.index % length(aws_subnet.private_ec2)].id
-  vpc_security_group_ids = [aws_security_group.ec2.id]
-  user_data = <<-EOF
-#!/bin/bash
-yum update -y
-yum install -y httpd
-systemctl start httpd
-systemctl enable httpd
-echo "<h1>Hello from Instance ${count.index + 1}</h1>" > /var/www/html/index.html
-EOF
-  tags = {
-    Project = "SimpleWebApplication"
-    Name    = "app-instance-${count.index + 1}"
-  }
-}
-
 resource "aws_lb_target_group_attachment" "main" {
-  count            = length(aws_instance.app)
+  count            = length(module.aws_instance.instance_ids)
   target_group_arn = aws_lb_target_group.main.arn
-  target_id        = aws_instance.app[count.index].id
+  target_id        = module.aws_instance.instance_ids[count.index]
   port             = 80
 }
 
