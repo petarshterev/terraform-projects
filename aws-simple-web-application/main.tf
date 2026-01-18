@@ -9,9 +9,8 @@ terraform {
     bucket = var.aws_state_bucket_name
     key    = "workspace/terraform.tfstate"
     region = var.region
-
-    dynamodb_table = "terraform_locks"
     encrypt        = true
+    use_lockfile = true
   }
 }
 
@@ -47,6 +46,7 @@ EOF
 ### Create private encrypted S3 bucket with enabled versioning and DynamoDB table for the terraform state files.
 resource "aws_s3_bucket" "terraform_state" {
   bucket = var.aws_state_bucket_name
+  object_lock_enabled = true
 }
 
 resource "aws_s3_bucket_acl" "terraform_state_acl" {
@@ -68,17 +68,6 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "example" {
     apply_server_side_encryption_by_default {
         sse_algorithm = "AES256"
     }
-  }
-}
-
-resource "aws_dynamodb_table" "terraform_locks" {
-  name         = "terraform_locks"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
   }
 }
 
