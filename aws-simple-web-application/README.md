@@ -1,6 +1,6 @@
-# AWS Simple Web Application Infrastructure
+# AWS containerized web application Infrastructure
 
-This project provides Terraform code to deploy a secure, high-availability web application infrastructure on AWS. It sets up a VPC with public and private subnets, an Application Load Balancer (ALB) with HTTPS termination, EC2 instances running a simple web app, and a PostgreSQL RDS database. The infrastructure includes remote state management with S3 and DynamoDB for locking.
+This project provides Terraform code to deploy a secure, high-availability web application infrastructure on AWS. It sets up a VPC with public and private subnets, an Application Load Balancer (ALB) with HTTPS termination, ECS Fargate instances running a containerized web app, and a PostgreSQL RDS database. The infrastructure includes remote state management with S3 and DynamoDB for locking.
 
 ## Architecture Overview
 
@@ -8,7 +8,8 @@ The infrastructure consists of the following components:
 
 - :white_check_mark: **VPC**: Isolated network with public and private subnets across 2 availability zones.
 - :white_check_mark: **ALB**: Internet-facing load balancer with HTTP->HTTPS listener using an AWS ACM certificate.
-- :white_check_mark: **EC2 Instances**: Private instances running a basic Apache web server (demo app).
+- :white_check_mark: **ECS Fargate**: Private instances running thecontainerized web app
+- :white_check_mark: **ECR Repository**: Container image registry
 - :white_check_mark: **RDS PostgreSQL**: Private database accessible only from EC2 instances.
 - :white_check_mark: **Route53**: DNS management and ACM certificate validation.
 - :white_check_mark: **Security Groups**: Restrictive rules allowing only necessary traffic.
@@ -19,10 +20,10 @@ The infrastructure consists of the following components:
 Internet
     |
     v
-ALB (HTTPS) --> EC2 Instances (Private) --> RDS PostgreSQL (Private)
-    ^
-    |
-Route53 (DNS)
+ALB (HTTPS) --> ECS Service (Fargate) --> RDS PostgreSQL (Private)
+    ^                    ^
+    |                    |
+Route53 (DNS)     ECR Repository
 ```
 
 ## Prerequisites
@@ -42,7 +43,8 @@ aws-simple-web-application/
 └── output.tf        # Terraform outputs
 README.md            # This file
 
-modules/aws_instance # Module for EC2 instance
+modules/ecr          # Module for ECR
+modules/ecs-fargate  # Module for the ECS Fargate
 
 ```
 
@@ -110,14 +112,13 @@ The configuration includes S3 and DynamoDB for remote state:
 ## Security Considerations
 
 - **HTTPS Only**: The traffic to the ALB can be over both HTTP and HTTPS, but the ALB upgrades any HTTP connections to HTTPS.
-- **Private Resources**: EC2 and RDS are in private subnets.
+- **Private Resources**: Everythign runs in private subnets.
 - **Security Groups**: Minimal ingress rules (ALB to EC2 on 80, EC2 to RDS on 5432, SSH allowed only from VPC). For troubleshooting purposes you have to either use the EC2 console or manually create an additional EC2 jumphost.
 - **Encryption**: S3 state bucket uses AES256 encryption.
 - **No Public SSH**: SSH access only from within the VPC.
 
 ## Customization
 
-- **Instance Count**: Adjust `aws_instances_number` in `variables.tf`.
 - **Region**: Change `region` variable (ensure AMI and AZs are compatible).
 - **App Deployment**: Replace the user data script in EC2 resource with your app code.
 - **Database**: Modify RDS settings for production (e.g., larger instance, backups, multi-AZ replicas, or read replicas).
