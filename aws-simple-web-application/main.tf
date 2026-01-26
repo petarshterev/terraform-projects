@@ -5,41 +5,59 @@ terraform {
       version = "~> 6.0"
     }
   }
-  backend "s3" {
+/*  backend "s3" {
     bucket = var.aws_state_bucket_name
     key    = "workspace/terraform.tfstate"
     region = var.region
     encrypt        = true
     use_lockfile = true
-  }
+  }*/
 }
 
 provider "aws" {
   region = var.region
 }
 
-### Retrieving some modules
-## AWS EC2 instance module
+### Container Infrastructure Modules
+## ECR Repository module
 
-module "aws_instance" {
-  source = "../modules/aws_instance"
+module "ecr" {
+  source = "../modules/ecr"
 
-  ami               = data.aws_ami.amazon_linux.id
-  instance_type     = var.instance_type
-  instance_count    = var.aws_instances_number
-  security_groups   = [aws_security_group.ec2.id]
-  subnet_ids        = aws_subnet.private_ec2[*].id
-  user_data         = <<-EOF
-#!/bin/bash
-yum update -y
-yum install -y httpd
-systemctl start httpd
-systemctl enable httpd
-echo "<h1>Hello from Instance \${count.index + 1}</h1>" > /var/www/html/index.html
-EOF
+  repository_name = var.ecr_repository_name
   tags = {
-    Project = "SimpleWebApplication"
-    Name    = "app-instance"
+    Project = var.project
+    Name    = "ecr-repository"
+  }
+}
+
+## ECS Fargate module
+
+module "ecs_fargate" {
+  source = "../modules/ecs-fargate"
+
+  cluster_name           = "var.app_name-cluster"
+  task_family            = "var.app_name-task"
+  service_name           = "var.app_name-service"
+  container_name         = var.app_name
+  container_port         = var.container_port
+  container_image_tag    = var.container_image_tag
+  ecr_repository_url     = module.ecr.repository_url
+  task_cpu               = var.task_cpu
+  task_memory            = var.task_memory
+  desired_count          = var.desired_count
+  subnet_ids             = aws_subnet.private_ec2[*].id
+  security_group_ids     = [aws_security_group.ecs.id]
+  alb_target_group_arn   = aws_lb_target_group.main.arn
+  container_environment  = var.container_environment
+  aws_region             = var.region
+  autoscaling_min_capacity = var.autoscaling_min_capacity
+  autoscaling_max_capacity = var.autoscaling_max_capacity
+  autoscaling_target_cpu   = var.autoscaling_target_cpu
+  autoscaling_cooldown     = var.autoscaling_cooldown
+  tags = {
+    Project = var.project
+    Name    = "ecs-fargate"
   }
 }
 
@@ -89,7 +107,7 @@ resource "aws_vpc" "main" {
   enable_dns_hostnames = true
   enable_dns_support   = true
   tags = {
-    Project = "SimpleWebApplication"
+    Project = var.project
     Name    = "main-vpc"
   }
 }
@@ -97,7 +115,7 @@ resource "aws_vpc" "main" {
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
   tags = {
-    Project = "SimpleWebApplication"
+    Project = var.project
     Name    = "main-igw"
   }
 }
@@ -109,7 +127,7 @@ resource "aws_subnet" "public" {
   availability_zone       = var.availability_zones[count.index]
   map_public_ip_on_launch = true
   tags = {
-    Project = "SimpleWebApplication"
+    Project = var.project
     Name    = "public-subnet-${count.index + 1}"
   }
 }
@@ -120,7 +138,7 @@ resource "aws_subnet" "private_ec2" {
   cidr_block        = var.private_subnets_ec2[count.index]
   availability_zone = var.availability_zones[count.index]
   tags = {
-    Project = "SimpleWebApplication"
+    Project = var.project
     Name    = "private-ec2-subnet-${count.index + 1}"
   }
 }
@@ -131,7 +149,7 @@ resource "aws_subnet" "private_rds" {
   cidr_block        = var.private_subnets_rds[count.index]
   availability_zone = var.availability_zones[count.index]
   tags = {
-    Project = "SimpleWebApplication"
+    Project = var.project
     Name    = "private-rds-subnet-${count.index + 1}"
   }
 }
@@ -143,7 +161,7 @@ resource "aws_route_table" "public" {
     gateway_id = aws_internet_gateway.main.id
   }
   tags = {
-    Project = "SimpleWebApplication"
+    Project = var.project
     Name    = "public-rt"
   }
 }
@@ -157,7 +175,7 @@ resource "aws_route_table_association" "public" {
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
   tags = {
-    Project = "SimpleWebApplication"
+    Project = var.project
     Name    = "private-rt"
   }
 }
@@ -196,7 +214,7 @@ resource "aws_security_group" "alb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = {
-    Project = "SimpleWebApplication"
+    Project = var.project
     Name    = "alb-sg"
   }
 }
@@ -223,7 +241,7 @@ resource "aws_security_group" "ec2" {
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = {
-    Project = "SimpleWebApplication"
+    Project = var.project
     Name    = "ec2-sg"
   }
 }
@@ -235,7 +253,7 @@ resource "aws_security_group" "rds" {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
-    security_groups = [aws_security_group.ec2.id]
+    security_groups = [aws_security_group.ecs.id]
   }
   egress {
     from_port   = 0
@@ -244,8 +262,35 @@ resource "aws_security_group" "rds" {
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = {
-    Project = "SimpleWebApplication"
+    Project = var.project
     Name    = "rds-sg"
+  }
+}
+
+resource "aws_security_group" "ecs" {
+  name   = "ecs-sg"
+  vpc_id = aws_vpc.main.id
+  ingress {
+    from_port       = var.container_port
+    to_port         = var.container_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+  ingress {
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    cidr_blocks     = [var.vpc_cidr]
+  }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  tags = {
+    Project = var.project
+    Name    = "ecs-sg"
   }
 }
 
@@ -291,26 +336,30 @@ resource "aws_lb" "main" {
   security_groups    = [aws_security_group.alb.id]
   subnets            = aws_subnet.public[*].id
   tags = {
-    Project = "SimpleWebApplication"
+    Project = var.project
     Name    = "main-alb"
   }
 }
 
 resource "aws_lb_target_group" "main" {
   name     = "main-tg"
-  port     = 80
+  port     = var.container_port
   protocol = "HTTP"
   vpc_id   = aws_vpc.main.id
+  target_type = "ip"
   health_check {
     enabled             = true
     healthy_threshold   = 2
     interval            = 30
     matcher             = "200"
-    path                = "/"
+    path                = "/health"
     port                = "traffic-port"
     protocol            = "HTTP"
     timeout             = 5
     unhealthy_threshold = 2
+  }
+  stickiness {
+    type = lb_cookie
   }
 }
 
@@ -340,18 +389,11 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-resource "aws_lb_target_group_attachment" "main" {
-  count            = length(module.aws_instance.instance_ids)
-  target_group_arn = aws_lb_target_group.main.arn
-  target_id        = module.aws_instance.instance_ids[count.index]
-  port             = 80
-}
-
 resource "aws_db_subnet_group" "main" {
   name       = "main-db-subnet-group"
   subnet_ids = aws_subnet.private_rds[*].id
   tags = {
-    Project = "SimpleWebApplication"
+    Project = var.project
     Name = "main-db-subnet-group"
   }
 }
@@ -368,7 +410,7 @@ resource "aws_db_instance" "main" {
   vpc_security_group_ids = [aws_security_group.rds.id]
   skip_final_snapshot    = true
   tags = {
-    Project = "SimpleWebApplication"
+    Project = var.project
     Name    = "main-postgres"
   }
 }
