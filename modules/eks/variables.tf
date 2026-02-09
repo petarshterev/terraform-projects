@@ -42,3 +42,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "node_pool_type" {
+  description = "List of node pool types for EKS Auto Mode"
+  type        = list(string)
+  default     = ["general-purpose"]
+}

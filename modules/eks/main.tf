@@ -34,6 +34,12 @@ resource "aws_eks_cluster" "this" {
     aws_iam_role_policy_attachment.cluster_AmazonEKSClusterPolicy
   ]
 
+  compute_config {
+    enabled       = true
+    node_pools    = var.node_pool_type
+    node_role_arn = aws_iam_role.nodes.arn
+  }
+
   tags = var.tags
 }
 
